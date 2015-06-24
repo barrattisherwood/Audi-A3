@@ -1104,33 +1104,35 @@
 
                 </section> 
 
-<footer>
-                <div id="copyrights">
+                <footer>
 
-                <div class="container clearfix">
+                    <div id="copyrights">
 
-                    <div class="col_half">
-                        Copyright &copy; 2015 All Rights Reserved McCarthy Audi.<br>
-                        <div class="copyright-links">
-                            <a target="_blank" href="http://www.mccarthyaudi.co.za">www.mccarthyaudi.co.za</a> | 
-                            <a target="_blank" href="http://my.callacar.co.za/#!/info/terms-of-use">Terms of Use</a> | Created by <a target="_blank" href="http://www.cbrmarketing.co.za">CBR Marketing</a></div>
-                    </div>
+                        <div class="container clearfix">
 
-                    <div class="col_half col_last tright">
-                        <div class="fright clearfix">
+                            <div class="col_half">
+                                Copyright &copy; 2015 All Rights Reserved McCarthy Audi.<br>
+                                <div class="copyright-links">
+                                    <a target="_blank" href="http://www.mccarthyaudi.co.za">www.mccarthyaudi.co.za</a> | 
+                                    <a target="_blank" href="http://my.callacar.co.za/#!/info/terms-of-use">Terms of Use</a> | Created by <a target="_blank" href="http://www.cbrmarketing.co.za">CBR Marketing</a></div>
+                            </div>
 
-                            <img src="images/custom/bidvestlogo.png" alt="Bidvest" />
+                            <div class="col_half col_last tright">
+                                <div class="fright clearfix">
+
+                                    <img src="images/custom/bidvestlogo.png" alt="Bidvest" />
+
+                                </div>
+
+                                <div class="clear"></div>
+
+                            </div>
 
                         </div>
 
-                        <div class="clear"></div>
-
-                    </div>
-
-                </div>
-
-            </div><!-- #copyrights end -->
-</footer>                
+                    </div><!-- #copyrights end -->
+                    
+                </footer>                
 
 
                         
