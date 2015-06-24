@@ -1,0 +1,634 @@
+<?php
+class McCarthy {
+
+	public function __construct($ci) {
+		$this->ci = $ci;
+		$this->db = $this->ci->db;
+	}
+
+	public function getContent($brand, $slug) {
+		$this->db->where('brand', $brand);
+		$this->db->where('slug', $slug);
+		$this->db->where('siteid', $this->ci->config->item('siteid'));
+		$this->db->where('published', 1);
+		$this->db->limit(1);
+		$result = $this->db->get('content');
+		foreach ($result->result() as $content) {
+			return $content;
+		}
+	}
+
+	public function getBlogByBrand($brand) {
+		$this->db->select('*');
+		$result = $this->db->get('blog');
+		$data = array();
+
+		foreach ($result->result() as $obj) {
+			$data[$obj->vid] = $obj;
+		}
+
+		return $data;
+	}
+
+	public function Price($brand, $model_keyword) {
+		$price = 'POA';
+
+		$model_ids = $this->ci->config->item('model_keywords');
+
+		if ($model_keyword || $model_ids[$brand][$model_keyword]['mid']) {
+			$mid = $model_ids[$brand][$model_keyword]['mid'];
+			$this->db->where('mid', $mid);
+			$this->db->limit(1);
+			$result = $this->db->get('new');
+			foreach ($result->result() as $price) {
+				$price = 'R ' . number_format($price->fretailpriceincl);
+				break;
+			}
+
+		}
+
+		return $price;
+	}
+
+	public function modelDropdown($brand, $umodel) {
+		$html = '<select name="model" id="model" required>
+                <option value="">Select your desired vehicle</option>';
+
+		foreach ($this->ci->config->item('model_keywords') as $kbrand => $models) {
+			if ($kbrand == $brand) {
+				foreach ($models as $model_keyword => $model) {
+					$html .= "<option value='$model_keyword'" . ($umodel == $model_keyword ? ' selected' : '') . ">$model[name]</option>";
+				}
+			}
+		}
+
+		$html .= '</select>';
+
+		return $html;
+	}
+
+	public function getNewVehicles($brand) {
+		$this->db->select('*');
+		$brand_mids = $this->ci->config->item('model_mids');
+		$this->db->where_in('mid', $brand_mids[$brand]);
+		$this->db->limit($this->ci->config->item('results_per_page'));
+		$result = $this->db->get('new');
+		$data = array();
+
+		foreach ($result->result() as $obj) {
+			$data[$obj->vid] = $obj;
+		}
+
+		return $data;
+	}
+
+	public function getUsedVehicles($brand, $demo = false, $offset = 0) {
+		$dealerships = $this->getDealershipsByBrand($brand);
+
+		foreach ($dealerships[$brand] as $dealership) {
+			$coynumbers[] = $dealership->coynumber;
+		}
+
+		$this->db->select('sql_calc_found_rows *', false);
+		$this->db->where_in('sdealercoy', $coynumbers);
+		if ($demo) {
+			$this->db->where('type', 'demo');
+		}
+
+		$this->db->limit($this->ci->config->item('results_per_page'));
+		$result = $this->db->get('used');
+		$data = array();
+
+		foreach ($result->result() as $obj) {
+			$data['result_set'][$obj->vid] = $obj;
+		}
+
+		$data['result_size'] = $result->num_rows();
+
+		$result = $this->db->query("select found_rows() as total");
+		foreach ($result->result() as $obj) {
+			$data['result_total'] = $obj->total;
+		}
+
+		return $data;
+	}
+
+	public function getUsedVehicle($vid) {
+		$result = $this->db->query('select *, lower(brand) as brand from used, dealerships where vid=' . (int) $vid . ' limit 1');
+		$data = array();
+
+		foreach ($result->result() as $obj) {
+			return $obj;
+		}
+	}
+
+	function getCarByMid($mid) {
+		$this->db->where('mid', $mid);
+		$this->db->limit(1);
+		$result = $this->db->get('new');
+
+		foreach ($result->result() as $obj) {
+			return $obj;
+		}
+	}
+
+	function getDealershipByCoy($coynumber) {
+		// get the details of the recipients.
+		$sql = $this->db->query('SELECT * FROM dealerships WHERE coynumber=?', array($coynumber));
+
+		foreach ($sql->result() as $res) {
+			return $res;
+		}
+	}
+
+	function processPartsRequest($post_data, $brand, $after) {
+		//form submitted.
+		$post_data['coynumber'] = intval($post_data['coynumber']);
+		$post_data['dealership_info'] = $this->getDealershipByCoy($post_data['coynumber']);
+
+		$to = 'percyla@gmail.com'; //$post_data['dealership_info']->dealership_dp_email;
+		$from = 'noreply@mccarthycjd.co.za';
+		$subject = 'New Parts Enquiry';
+
+		$to = 'percyla@gmail.com'; //$post_data['dealership_info']->$car_type_recipient;
+		$cc = 'percyla@gmail.com'; //$post_data['dealership_info']->dealership_dp_email;
+		$from = 'noreply@' . $this->ci->config->item('domain');
+
+		//save to db
+		$this->db->set('name', $post_data['name']);
+		$this->db->set('surname', $post_data['name']);
+		$this->db->set('email', $post_data['email']);
+		$this->db->set('cellno', $post_data['cellno']);
+		$this->db->set('created', date('Y-m-d H:i:s'));
+		$this->db->set('coy', $post_data['coynumber']);
+		$this->db->set('part_number', $post_data['part_number']);
+		$this->db->set('make', ($post_data['make'] ?: $post_data['_variant']));
+		$this->db->set('model', $post_data['model']);
+		$this->db->set('year', $post_data['year']);
+		$this->db->set('series', $post_data['series']);
+		$this->db->set('fid', time());
+		if ($this->db->insert('leads_parts')) {
+			$post_data['leadID'] = $this->db->insert_id();
+		} else {
+			$to = 'percyl@cbrmarketing.co.za';
+			$cc = 'percyl@cbrmarketing.co.za';
+			$subject = "[{$post_data['coynumber']}]" . '[NOT SAVED] ' . $subject;
+		}
+
+		$post_data['title'] = $subject;
+		$html = $this->ci->load->view('emails/parts_email_template', $post_data, true);
+
+		$this->DispatchEmail($to, $from, $cc, $subject, $html, $after);
+	}
+
+	function processPreownedEnquiry($post_data, $brand, $after) {
+		//form submitted.
+		$post_data['coynumber'] = intval($post_data['coynumber']);
+
+		// get the details of the recipients.
+		$post_data['dealership_info'] = $this->getDealershipByCoy($post_data['coynumber']);
+
+		//get the car details
+		$post_data['offer'] = $this->McCarthy->getUsedVehicle($vid);
+
+		$to = 'percyla@gmail.com'; //$post_data['dealership_info']->dealership_dp_email;
+		$from = 'noreply@mccarthycjd.co.za';
+		$subject = 'NEW CONTACT FORM SUBMISSION';
+		$after = base_url() . "thankyou/$brand/{$post_data['offer']->vid}";
+
+		//save to db
+		$this->db->set('name', $post_data['name']);
+		$this->db->set('surname', $post_data['name']);
+		$this->db->set('email', $post_data['email']);
+		$this->db->set('cellno', $post_data['cellno']);
+		$this->db->set('opt_in_marketing_sms', 1);
+		$this->db->set('coy', $post_data['coynumber']);
+		$this->db->set('newsletter', 1);
+		$this->db->set('opt_in_marketing_email', 1);
+		$this->db->set('vehicleid', $post_data['offer']->vid);
+		$this->db->set('created', date('Y-m-d H:i:s'));
+		$this->db->set('fid', time());
+		$this->db->set('car_info', json_encode($post_data['offer']));
+		if ($this->db->insert('leads_preowned_vehicles')) {
+			$post_data['leadID'] = $this->db->insert_id();
+		} else {
+			$to = 'percyl@cbrmarketing.co.za';
+			$cc = 'percyl@cbrmarketing.co.za';
+			$subject = "[{$post_data['coynumber']}]" . '[NOT SAVED] ' . $subject;
+		}
+
+		$from = 'noreply@mccarthycjd.co.za';
+		$post_data['title'] = $subject;
+		$html = $this->ci->load->view('emails/used_car_email_template', $post_data, true) . $this->db->_error_message();
+
+		$this->McCarthy->DispatchEmail($to, $from, $cc, $subject, $html, $after);
+	}
+
+	function processDealershipMessage($post_data, $brand, $after) {
+		//form submitted.
+		$post_data['coynumber'] = intval($post_data['coynumber']);
+		$post_data['dealership_info'] = $this->getDealershipByCoy($post_data['coynumber']);
+
+		$to = 'percyl@cbrmarketing.co.za'; //$post_data['dealership_info']->dealership_dp_email;
+		$from = 'noreply@mccarthycjd.co.za';
+		$subject = 'NEW CONTACT FORM SUBMISSION';
+
+		//save to db
+		$this->db->set('name', $post_data['name']);
+		$this->db->set('surname', $post_data['name']);
+		$this->db->set('email', $post_data['email']);
+		$this->db->set('cellno', $post_data['cellno']);
+		$this->db->set('message', $post_data['message']);
+		$this->db->set('created', date('Y-m-d H:i:s'));
+		$this->db->set('coy', $post_data['coynumber']);
+		$this->db->set('msg_hash', md5($post_data['message']));
+		$this->db->set('fid', time());
+
+		if ($post_data['is_special']) {
+			$this->db->set('special_title', $post_data['special_title']);
+			$this->db->set('special_brand', $post_data['special_brand']);
+			$this->db->set('special_id', $post_data['special_id']);
+		}
+
+		if ($this->db->insert($post_data['is_special'] ? 'leads_contact_specials' : 'leads_contact')) {
+			$post_data['leadID'] = $this->db->insert_id();
+		} else {
+			$to = 'percyl@cbrmarketing.co.za';
+			$cc = 'percyl@cbrmarketing.co.za';
+			$subject = "[{$post_data['coynumber']}]" . '[NOT SAVED] ' . $subject;
+		}
+
+		$post_data['title'] = $subject;
+		$html = $this->ci->load->view('emails/contact_email_template', $post_data, true) . $this->db->_error_message();
+
+		$this->DispatchEmail($to, $from, $cc, $subject, $html, $after);
+	}
+
+	function processTestDrive($post_data, $brand, $after) {
+		//form submitted.
+		$post_data['coynumber'] = intval($post_data['coynumber']);
+		$post_data['dealership_info'] = $this->getDealershipByCoy($post_data['coynumber']);
+
+		//get the car
+		$mids = $this->ci->config->item('model_keywords');
+		$mid = $mids[$brand][$post_data['model']]['mid'];
+		$car_data = $this->getCarByMid($mid);
+
+		$post_data['make'] = $car_data->sbrandname;
+		$post_data['model'] = $car_data->smodelname;
+		$post_data['series'] = $car_data->sseriesname;
+		$post_data['car_to_test'] = $car_data->sseriesname;
+
+		$to = 'percyla@gmail.com'; //$post_data['dealership_info']->dealership_dp_email;
+		$from = 'noreply@mccarthycjd.co.za';
+		$subject = 'NEW TEST DRIVE BOOKING';
+
+		$car_type_recipient = $post_data['test_drive'] == 'preowned' ? 'dealership_used_vehicles_emails' : 'dealership_new_vehicles_emails';
+		$to = 'percyla@gmail.com'; //$post_data['dealership_info']->$car_type_recipient;
+		$cc = 'percyla@gmail.com'; //$post_data['dealership_info']->dealership_dp_email;
+		$from = 'noreply@' . $this->ci->config->item('domain');
+		$subject = 'New Test Drive Booking (' . ucfirst($post_data['test_drive']) . ')';
+
+		//save to db
+		$this->db->set('name', $post_data['name']);
+		$this->db->set('surname', $post_data['name']);
+		$this->db->set('email', $post_data['email']);
+		$this->db->set('cellno', $post_data['cellno']);
+		$this->db->set('created', date('Y-m-d H:i:s'));
+		$this->db->set('coy', $post_data['coynumber']);
+		$this->db->set('test_drive_date', $post_data['test_drive_date']);
+		$this->db->set('test_drive_time', @$post_data['test_drive_time']);
+		$this->db->set('make', $car_data->sbrandname);
+		$this->db->set('model', $car_data->smodelname);
+		$this->db->set('year', 0);
+		$this->db->set('car_type', $post_data['test_drive']);
+		$this->db->set('series', $car_data->sseriesname);
+		$this->db->set('fid', time());
+		if ($this->db->insert('leads_bookings_test_drive')) {
+			$post_data['leadID'] = $this->db->insert_id();
+		} else {
+			$to = 'percyl@cbrmarketing.co.za';
+			$cc = 'percyl@cbrmarketing.co.za';
+			$subject = "[{$post_data['coynumber']}]" . '[NOT SAVED] ' . $subject;
+		}
+
+		$post_data['title'] = $subject;
+		$html = $this->ci->load->view('emails/bookings_testdrive_email_template', $post_data, true) . $this->db->_error_message();
+		$this->DispatchEmail($to, $from, $cc, $subject, $html, $after);
+	}
+
+	public function getSpecials($offset = 0) {
+		$this->db->select('sql_calc_found_rows *', false);
+		$this->db->limit($this->ci->config->item('results_per_page'), (int) $offset);
+		$result = $this->db->get('specials');
+		$data = array();
+
+		foreach ($result->result() as $obj) {
+			$data['result_set'][$obj->specialid] = $obj;
+		}
+
+		$data['result_size'] = $result->num_rows();
+
+		$result = $this->db->query("select found_rows() as total");
+		foreach ($result->result() as $obj) {
+			$data['result_total'] = $obj->total;
+		}
+
+		return $data;
+	}
+
+	function DispatchEmail($to, $from, $cc, $subject, $body, $after = null, $attachments = array()) {
+		$this->ci->load->library('email', $this->ci->config->item('email_config'));
+		$this->ci->email->set_newline("\r\n");
+		$this->ci->email->to($to);
+		if (isset($cc)) {
+			$this->ci->email->cc($cc);
+		}
+
+		if (isset($bcc)) {
+			$this->ci->email->bcc($bcc);
+		}
+
+		if ($attachments) {
+			foreach ($attachments as $attachment) {
+				$this->ci->email->attach($attachment);
+			}
+		}
+		$this->ci->email->from($from);
+		$this->ci->email->subject($subject);
+		$this->ci->email->message($body);
+		$this->ci->email->set_alt_message(strip_tags($body));
+
+		if ($this->ci->email->send()) {
+			if (@$thank_u_email) {
+				$this->ci->email->clear();
+				$this->ci->email->to($thank_u_email['to']);
+				if ($thank_u_email['attachments']) {
+					foreach ($thank_u_email['attachments'] as $attachment) {
+						$this->ci->email->attach($attachment);
+					}
+				}
+				$this->ci->email->from($from);
+				$this->ci->email->subject($thank_u_email['subject']);
+				$this->ci->email->message($thank_u_email['body']);
+				$this->ci->email->set_alt_message(strip_tags($thank_u_email['body']));
+
+				//send thank you to the submitter
+				$this->ci->email->send();
+			}
+
+			//redirect to thank you if any
+			if (filter_var($after, FILTER_VALIDATE_URL)) {
+				redirect($after);
+			}
+
+		} else {
+			die("<div style='width:50%;padding:24px;text-align:center; margin:24px auto;font-family:arial;border:solid'>We could not send your request. Something went wrong. Please <a href='javascript:history.go(-1)'>try again</a>, or <a href='/'>try later</a></div>");
+		}
+
+	}
+
+	public function getDealershipsByBrand($brand) {
+		$brand = strtoupper($brand);
+		$this->db->select('*');
+		$this->db->select('lower(brand) as brand');
+		$this->db->where('brand', ($brand));
+		$this->db->or_like('brand', ($brand));
+		$result = $this->db->get('dealerships');
+		$data = array();
+
+		foreach ($result->result() as $obj) {
+			$data[$obj->brand][$obj->coynumber] = $obj;
+		}
+
+		return $data;
+	}
+
+	public function getDealerships() {
+		$this->db->select('*');
+		$this->db->select('lower(brand) as brand');
+		$result = $this->db->get('dealerships');
+		$data = array();
+		foreach ($result->result() as $obj) {
+			$obj->brand = strtolower($obj->brand);
+			$data[$obj->brand][$obj->coynumber] = $obj;
+		}
+
+		return $data;
+	}
+
+	public function getDealership($coynumber) {
+		$this->db->select('*');
+		$this->db->select('lower(brand) as brand');
+		$this->db->where('coynumber', $coynumber);
+		$this->db->limit(1);
+		$result = $this->db->get('dealerships');
+		$data = array();
+		$data = $result->result();
+		return $data[0];
+	}
+
+	public static function DealershipUrl($branch, $slug = '') {
+		return "/dealership/$branch->coynumber/";
+	}
+
+	public static function ServiceBookingUrl($brand) {
+		return "/service/$brand/";
+	}
+
+	public static function TrucksUrl($brand) {
+		return "/trucks/$brand/";
+	}
+
+	public static function ContactUrl($brand) {
+		return self::DealershipsUrl($brand); //dealership network and contact us are same thing.
+	}
+
+	public static function TermsandConditionsUrl($brand) {
+		return "/terms/$brand/";
+	}
+
+	public static function BrandUrl($brand) {
+		return "/brand/$brand/";
+	}
+
+	public static function NewVehiclesUrl($brand) {
+		return "/new/$brand/new-vehicles/";
+	}
+
+	public static function UsedVehiclesUrl($brand, $coynumber = null) {
+		return "/used/$brand/" . ($coynumber ? $coynumber . "/" : '');
+	}
+
+	public static function DemosUrl($brand, $coynumber = null) {
+		return "/demo/$brand/" . ($coynumber ? $coynumber . "/" : '');
+	}
+
+	public static function SpecialsUrl($brand) {
+		return "/specials/$brand/";
+	}
+
+	public static function SpecialUrl($id) {
+		return "/special/$id";
+	}
+
+	public static function DealershipsUrl($brand) {
+		return "/dealerships/$brand/";
+	}
+
+	public static function AboutUrl($brand) {
+		return "/about/$brand/";
+	}
+
+	public static function BlogUrl($brand) {
+		return "/blog/$brand";
+	}
+
+	public function UsedVehicleDetailUrl($vehicle, $brand) {
+		return "/preowned/$brand/$vehicle->vid";
+	}
+
+	public static function NewCarUrl($brand, $model_keyword) {
+		return "/new/$brand/$model_keyword/";
+	}
+
+	public static function NewCarSeriesUrl($brand, $model_keyword) {
+		return "/series/$brand/$model_keyword/";
+	}
+
+	public static function TestDriveUrl($brand, $model_keyword = '') {
+		return "/testdrive/$brand/" . ($model_keyword ? "$model_keyword/" : '');
+	}
+
+	public static function BrochureUrl($brand, $model_keyword) {
+		return "/brochure/$model_keyword/";
+	}
+
+	public static function BrochuresUrl($brand) {
+		return "/brochures/$brand/";
+	}
+
+	public static function SiteMapUrl() {
+		return "/sitemap/";
+	}
+
+	public static function ServiceInfoUrl($brand) {
+		return "/service-information/$brand/";
+	}
+
+	public static function PartsUrl($brand) {
+		return "/parts/$brand/";
+	}
+
+	public static function SettlementUrl($brand) {
+		return "/settlement/$brand/";
+	}
+
+	public static function MaintencePlanUrl($brand) {
+		return "/maintenance/$brand/";
+	}
+
+	public static function MechanicalBreakdownUrl($brand) {
+		return "/breakdown/$brand/";
+	}
+
+	public static function ShortfallProtectionUrl($brand) {
+		return "/shortfall-protection/$brand/";
+	}
+
+	public static function SmartStandardUrl($brand) {
+		return "/smart-standard-elite/$brand/";
+	}
+
+	public static function VeridotUrl($brand) {
+		return "/veridot/$brand/";
+	}
+
+	public static function xSureUrl($brand) {
+		return "/xsure/$brand/";
+	}
+
+	public static function InsuranceUrl($brand) {
+		return "/insurance/$brand/";
+	}
+
+	public static function InstallmentSaleUrl($brand) {
+		return "/instalment/$brand/";
+	}
+
+	public static function LeaseUrl($brand) {
+		return "/lease/$brand/";
+	}
+
+	public static function TakeABreakUrl($brand) {
+		return "/takeabreak/$brand/";
+	}
+
+	function EnquireSpecialUrl($obj, $brand) {
+		return self::DealershipsUrlForSpecials($obj, $brand);
+	}
+
+	public static function FinancialServicesUrl($brand) {
+		return "/financial-services/$brand/";
+	}
+
+	function DealershipsUrlForSpecials($obj, $brand) {
+		return self::DealershipsUrl($brand) . $obj->brand . '/' . $obj->dealercoynumber . '/' . base64_encode($obj->title);
+	}
+
+	function ShowResults($data, $template, $brand = '') {
+		$find = $replace = array();
+
+		//find all template keys
+		preg_match_all('@{{([a-zA-Z0-9_#]+)}}@', $template, $keys);
+
+		foreach ($keys[1] as $key) {
+			$find[] = '{{' . $key . '}}';
+		}
+
+		foreach ($data as $id => $entity) {
+			$replace = array();
+			foreach ($keys[1] as $key) {
+				//special formatting
+				switch ($key) {
+					case 'princl':
+					case 'kms':
+						$entity->$key = str_replace('.00', '', $entity->$key);
+						$entity->$key = @number_format($entity->$key);
+						break;
+
+					case 'img1':
+					case 'img2':
+					case 'img3':
+					case 'img4':
+					case 'img5':
+						$entity->$key = ($entity->$key == '' || $entity->$key == 'noimage') ? '/img/' . $brand . '/no-image.jpg' : $entity->$key;
+
+						break;
+
+				}
+
+				if (substr($key, 0, 1) == '#') {
+					$func = substr($key, 1);
+					$entity->$key = self::$func($entity, $brand);
+
+				}
+
+				$replace[] = $entity->$key;
+			}
+			echo str_replace($find, $replace, $template);
+		}
+	}
+
+	function Paginator($base_url, $data) {
+		$this->ci->load->library('pagination');
+
+		$config['base_url'] = $base_url;
+		$config['total_rows'] = $data['result_total'];
+		$config['per_page'] = $this->ci->config->item('results_per_page');
+
+		$this->ci->pagination->initialize($config);
+
+		return $this->ci->pagination->create_links();
+	}
+}
